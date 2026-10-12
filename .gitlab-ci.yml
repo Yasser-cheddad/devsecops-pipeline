@@ -1,6 +1,6 @@
 # ============================================================
 #  DevSecOps Pipeline – GitLab CI
-#  PFE Cybersécurité – EST
+#  PFa Cybersécurité – 
 #  Outils : TruffleHog · Semgrep · Snyk · Trivy · Checkov · OWASP ZAP
 #  Cloud   : AWS ECR + ECS Fargate via Terraform
 # ============================================================
