@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 OWASP ZAP Automation Script
-PFE DevSecOps – EST Cybersécurité
+Pfa DevSecOps – EST Cybersécurité
 Usage: python3 zap-scan.py --target http://app:3000 --zap-host zap --zap-port 8080
 """
 
