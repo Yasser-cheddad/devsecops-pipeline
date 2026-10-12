@@ -1,0 +1,18 @@
+# Python
+**/.venv/
+__pycache__/
+*.pyc
+.env
+
+# Node
+node_modules/
+dashboard/frontend/dist/
+
+# Reports (generated in CI)
+reports/*.json
+!reports/.gitkeep
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/terraform

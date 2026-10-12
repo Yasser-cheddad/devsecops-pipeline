@@ -1,0 +1,22 @@
+{
+  "venvPath": "ai-service",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "executionEnvironments": [
+    {
+      "root": "ai-service",
+      "venv": ".venv",
+      "venvPath": "ai-service",
+      "extraPaths": ["ai-service"]
+    },
+    {
+      "root": "dashboard/backend",
+      "venv": ".venv",
+      "venvPath": "ai-service",
+      "extraPaths": [
+        "dashboard/backend",
+        "ai-service/.venv/Lib/site-packages"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/ai-service/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/ai-service",
+    "${workspaceFolder}/dashboard/backend",
+    "${workspaceFolder}/ai-service/.venv/Lib/site-packages"
+  ],
+  "basedpyright.analysis.diagnosticMode": "workspace",
+  "basedpyright.analysis.venvPath": "ai-service",
+  "basedpyright.analysis.venv": ".venv",
+  "basedpyright.analysis.extraPaths": [
+    "${workspaceFolder}/ai-service/.venv/Lib/site-packages"
+  ]
+}

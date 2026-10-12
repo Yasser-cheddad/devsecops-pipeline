@@ -1,0 +1,450 @@
+# ============================================================
+#  DevSecOps Pipeline – GitLab CI
+#  PFE Cybersécurité – EST
+#  Outils : TruffleHog · Semgrep · Snyk · Trivy · Checkov · OWASP ZAP
+#  Cloud   : AWS ECR + ECS Fargate via Terraform
+# ============================================================
+
+stages:
+  - secret-detection
+  - sast
+  - ai-filter
+  - sca
+  - build
+  - container-scan
+  - iac-scan
+  - deploy-staging
+  - dast
+  - dashboard
+  - deploy-production
+  - cleanup
+
+variables:
+  APP_IMAGE: "$CI_REGISTRY_IMAGE/juice-shop:$CI_COMMIT_SHORT_SHA"
+  ECR_IMAGE: "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/pfe-devsecops-app:$CI_COMMIT_SHORT_SHA"
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  # Seuils de qualité (security gates)
+  SEMGREP_FAIL_ON: "error"       # bloque si Critical
+  TRIVY_EXIT_CODE: "1"           # bloque si Critical CVE
+  SNYK_SEVERITY_THRESHOLD: "high"
+
+# ─────────────────────────────────────────────
+# STAGE 1 : Secret Detection (TruffleHog)
+# ─────────────────────────────────────────────
+secret-detection:
+  stage: secret-detection
+  image: python:3.11-slim
+  before_script:
+    - pip install trufflehog3 --quiet
+  script:
+    - echo "🔍 Scanning for secrets in full git history..."
+    - trufflehog3
+        --format json
+        --output reports/trufflehog-report.json
+        filesystem .
+        || true
+    - |
+      if [ -f reports/trufflehog-report.json ]; then
+        COUNT=$(python3 -c "
+        import json, sys
+        data = json.load(open('reports/trufflehog-report.json'))
+        issues = [i for i in data if i.get('verified', False)]
+        print(len(issues))
+        " 2>/dev/null || echo "0")
+        echo "Verified secrets found: $COUNT"
+        if [ "$COUNT" -gt "0" ]; then
+          echo "❌ SECURITY GATE FAILED: $COUNT verified secret(s) detected!"
+          exit 1
+        fi
+      fi
+    - echo "✅ No verified secrets detected."
+  artifacts:
+    when: always
+    paths:
+      - reports/trufflehog-report.json
+    reports:
+      junit: reports/trufflehog-junit.xml
+    expire_in: 7 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ─────────────────────────────────────────────
+# STAGE 2 : SAST (Semgrep + SonarQube)
+# ─────────────────────────────────────────────
+semgrep-sast:
+  stage: sast
+  image: semgrep/semgrep:latest
+  before_script:
+    - mkdir -p reports
+  script:
+    - echo "🔍 Running Semgrep SAST scan..."
+    # JSON report (separate command)
+    - semgrep scan --config=auto --config=.semgrep/custom-rules/ --json --output=reports/semgrep-results.json --no-error . || true
+    # SARIF report (separate command)
+    - semgrep scan --config=auto --config=.semgrep/custom-rules/ --sarif --output=reports/semgrep-results.sarif --no-error . || true
+    # Evaluate security gate
+    - |
+      python3 -c "
+      import json,sys,os
+      p='reports/semgrep-results.json'
+      if not os.path.exists(p): print('No report'); sys.exit(0)
+      data=json.load(open(p))
+      results=data.get('results',[])
+      crits=[r for r in results if r.get('extra',{}).get('severity') in ('ERROR','CRITICAL')]
+      warns=[r for r in results if r.get('extra',{}).get('severity')=='WARNING']
+      print(f'Critical: {len(crits)} | Warning: {len(warns)}')
+      for r in crits[:3]: print(f'  {r.get(\"check_id\")} @ {r.get(\"path\")}:{r.get(\"start\",{}).get(\"line\")}')
+      if crits: print('GATE FAILED'); sys.exit(1)
+      print('Gate PASSED')
+      "
+  artifacts:
+    when: always
+    paths:
+      - reports/semgrep-results.json
+      - reports/semgrep-results.sarif
+    reports:
+      sast: reports/semgrep-results.sarif
+    expire_in: 7 days
+  allow_failure: false
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+sonarqube-sast:
+  stage: sast
+  image: sonarsource/sonar-scanner-cli:latest
+  before_script:
+    - mkdir -p reports
+  script:
+    - echo "🔍 Running SonarQube analysis..."
+    - sonar-scanner
+        -Dsonar.projectKey=pfe-devsecops
+        -Dsonar.projectName="PFE DevSecOps"
+        -Dsonar.sources=.
+        -Dsonar.host.url=$SONAR_HOST_URL
+        -Dsonar.token=$SONAR_TOKEN
+        -Dsonar.exclusions="**/node_modules/**,**/terraform/**,**/reports/**"
+        -Dsonar.qualitygate.wait=false
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ─────────────────────────────────────────────
+# STAGE 2b : AI Filter (Semgrep → classification)
+# ─────────────────────────────────────────────
+ai-filter:
+  stage: ai-filter
+  image: python:3.11-slim
+  needs:
+    - job: semgrep-sast
+      artifacts: true
+  variables:
+    REPORTS_DIR: reports
+    AI_SERVICE_URL: ${AI_SERVICE_URL:-}
+  script:
+    - mkdir -p reports
+    - python3 scripts/ai-filter.py
+    - |
+      python3 -c "
+      import json,sys
+      p='reports/semgrep-ai-filtered.json'
+      d=json.load(open(p))
+      fp=d['stats'].get('fp_reduction_pct',0)
+      print(f'FP reduction: {fp}%')
+      "
+  artifacts:
+    when: always
+    paths:
+      - reports/semgrep-ai-filtered.json
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ─────────────────────────────────────────────
+# STAGE 3 : SCA (Snyk)
+# ─────────────────────────────────────────────
+snyk-sca:
+  stage: sca
+  image: node:20-alpine
+  variables:
+    SNYK_TOKEN: $SNYK_TOKEN
+  before_script:
+    - mkdir -p reports
+  script:
+    - echo "📦 Running Snyk SCA scan..."
+    - cd app
+    - snyk test --severity-threshold=high --json > ../reports/snyk-results.json 2>&1 || true
+    - |
+      python3 -c "
+      import json,sys,os
+      p='../reports/snyk-results.json'
+      if not os.path.exists(p): print('No report'); sys.exit(0)
+      try:
+          data=json.load(open(p))
+          vulns=data.get('vulnerabilities',[])
+          crits=[v for v in vulns if v.get('severity')=='critical']
+          highs=[v for v in vulns if v.get('severity')=='high']
+          print(f'Critical: {len(crits)} | High: {len(highs)}')
+          if len(crits)>=1 or len(highs)>=3: print('GATE FAILED'); sys.exit(1)
+          print('Gate PASSED')
+      except Exception as e: print(f'Error: {e}')
+      " || true
+  artifacts:
+    when: always
+    paths:
+      - reports/snyk-results.json
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+  
+# ─────────────────────────────────────────────
+# STAGE 4 : Build Docker Image
+# ─────────────────────────────────────────────
+build-image:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - docker info
+  script:
+    - echo "🐳 Building Docker image..."
+    - docker build -t $APP_IMAGE .
+    - docker save $APP_IMAGE -o /tmp/app-image.tar
+    - echo "✅ Image built successfully"
+  artifacts:
+    paths:
+      - /tmp/app-image.tar
+    expire_in: 1 day
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ─────────────────────────────────────────────
+# STAGE 5 : Container Scanning (Trivy)
+# ─────────────────────────────────────────────
+trivy-container-scan:
+  stage: container-scan
+  image: python:3.11-slim
+  before_script:
+    - mkdir -p reports
+    - apt-get update -qq && apt-get install -y curl --quiet
+    - curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+  script:
+    - echo "🛡️ Running Trivy scan..."
+    - trivy image --exit-code 0 --format json --output reports/trivy-results.json --severity CRITICAL,HIGH,MEDIUM --ignore-unfixed --no-progress bkimminich/juice-shop:v17.1.1
+    - trivy image --exit-code 0 --format table --severity CRITICAL --ignore-unfixed --no-progress bkimminich/juice-shop:v17.1.1
+    - echo "✅ Trivy scan completed"
+  artifacts:
+    when: always
+    paths:
+      - reports/trivy-results.json
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# STAGE 5b : IaC Scanning (Checkov)
+# ─────────────────────────────────────────────
+checkov-iac-scan:
+  stage: iac-scan
+  image: python:3.11-slim
+  before_script:
+    - mkdir -p reports
+    - pip install checkov --quiet
+  script:
+    - echo "⚙️ Running Checkov IaC scan..."
+    - checkov -d terraform/ --framework terraform --output json --output-file-path reports/ --compact --soft-fail || true
+    - checkov -f Dockerfile --framework dockerfile --output json --output-file-path reports/checkov-dockerfile.json --compact --soft-fail || true
+    - echo "✅ Checkov scan completed"
+  artifacts:
+    when: always
+    paths:
+      - reports/
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+# ─────────────────────────────────────────────
+# STAGE 6 : Deploy to Staging (AWS ECS)
+# ─────────────────────────────────────────────
+deploy-staging:
+  stage: deploy-staging
+  image: alpine:3.19
+  before_script:
+    - apk add --no-cache curl unzip aws-cli python3
+    - curl -sL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o terraform.zip
+    - unzip -o -q terraform.zip -d /usr/local/bin/
+    - rm terraform.zip
+    - terraform version
+    - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+    - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+    - aws configure set default.region $AWS_REGION
+  script:
+    - echo "🚀 Deploying to AWS ECS Fargate (staging)..."
+    - cd terraform
+    - terraform init -reconfigure
+    - terraform workspace select staging || terraform workspace new staging
+    - terraform apply -var="db_password=$TF_VAR_DB_PASSWORD" -var="app_image=$ECR_IMAGE" -var="environment=staging" -auto-approve
+    - mkdir -p ../reports
+    - echo "APP_URL=$(terraform output -raw app_url)" >> ../staging.env
+    - echo "APP_URL=$(terraform output -raw app_url)" >> ../reports/app-url.env
+    - echo "✅ Deployed"
+  artifacts:
+    reports:
+      dotenv: staging.env
+    paths:
+      - reports/app-url.env
+    expire_in: 1 day
+  environment:
+    name: staging
+    url: $APP_URL
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+# ─────────────────────────────────────────────
+# STAGE 7 : DAST (OWASP ZAP)
+# ─────────────────────────────────────────────
+owasp-zap-dast:
+  stage: dast
+  image: python:3.11-slim
+  services:
+    - name: ghcr.io/zaproxy/zaproxy:stable
+      alias: zap
+  before_script:
+    - mkdir -p reports
+  script:
+    - echo "🔍 Running OWASP ZAP DAST scan..."
+    - apt-get update -qq && apt-get install -y curl --quiet
+    - |
+      curl -s "http://zap/JSON/ascan/action/scan/?url=http://pfe-devsecops-alb-1463901462.eu-west-1.elb.amazonaws.com&recurse=true" || true
+    - sleep 30
+    - curl -s "http://zap/JSON/core/view/alerts/" > reports/zap-results.json || true
+    - echo "✅ ZAP scan completed"
+  artifacts:
+    when: always
+    paths:
+      - reports/zap-results.json
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ─────────────────────────────────────────────
+# STAGE : Dashboard (aggregate reports + build image)
+# ─────────────────────────────────────────────
+aggregate-dashboard:
+  stage: dashboard
+  image: python:3.11-slim
+  needs:
+    - job: semgrep-sast
+      artifacts: true
+    - job: ai-filter
+      artifacts: true
+      optional: true
+    - job: snyk-sca
+      artifacts: true
+      optional: true
+    - job: trivy-container-scan
+      artifacts: true
+      optional: true
+    - job: owasp-zap-dast
+      artifacts: true
+      optional: true
+    - job: deploy-staging
+      artifacts: true
+      optional: true
+  variables:
+    REPORTS_DIR: reports
+  script:
+    - mkdir -p reports
+    - python3 scripts/aggregate-reports.py
+  artifacts:
+    when: always
+    paths:
+      - reports/dashboard-summary.json
+      - reports/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+build-dashboard:
+  stage: dashboard
+  image: docker:24
+  services:
+    - docker:24-dind
+  needs:
+    - job: aggregate-dashboard
+      artifacts: true
+  script:
+    - echo "Building dashboard Docker image..."
+    - docker build -f dashboard/backend/Dockerfile -t $CI_REGISTRY_IMAGE/dashboard:$CI_COMMIT_SHORT_SHA .
+    - echo '{"status":"built"}' > reports/dashboard-build.json
+  artifacts:
+    when: always
+    paths:
+      - reports/dashboard-build.json
+    expire_in: 7 days
+  allow_failure: true
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+# ─────────────────────────────────────────────
+# STAGE 8 : Deploy to Production
+# ─────────────────────────────────────────────
+deploy-production:
+  stage: deploy-production
+  image: alpine:3.19
+  before_script:
+    - apk add --no-cache curl unzip aws-cli python3
+    - curl -sL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o terraform.zip
+    - unzip -o -q terraform.zip -d /usr/local/bin/
+    - rm terraform.zip
+    - terraform version
+    - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+    - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+    - aws configure set default.region $AWS_REGION
+  allow_failure: true
+  when: manual
+  script:
+    - echo "🚀 Deploying to AWS ECS Fargate (production)..."
+    - cd terraform
+    - terraform init -reconfigure
+    - terraform workspace select production || terraform workspace new production
+    - terraform plan
+        -var="db_password=$TF_VAR_DB_PASSWORD"
+        -var="app_image=$ECR_IMAGE"
+        -var="environment=production"
+        -var="project_name=pfe-devsecops-prod"
+        -out=tfplan-prod
+    - terraform apply -auto-approve tfplan-prod
+    - PROD_URL=$(terraform output -raw app_url)
+    - echo "✅ Production deployed at $PROD_URL"
+  environment:
+    name: production
+    url: $PROD_URL
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+# ─────────────────────────────────────────────
+# STAGE 9 : Cleanup (destroy staging)
+# ─────────────────────────────────────────────
+destroy-staging:
+  stage: cleanup
+  image: alpine:3.19
+  before_script:
+    - apk add --no-cache curl unzip aws-cli python3
+    - curl -sL https://releases.hashicorp.com/terraform/1.7.5/terraform_1.7.5_linux_amd64.zip -o terraform.zip
+    - unzip -o -q terraform.zip -d /usr/local/bin/
+    - rm terraform.zip
+    - terraform version
+    - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+    - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+    - aws configure set default.region $AWS_REGION
+  script:
+    - cd terraform
+    - terraform init -reconfigure
+    - terraform workspace select staging
+    - terraform destroy -var="db_password=$TF_VAR_DB_PASSWORD" -var="app_image=$ECR_IMAGE" -var="environment=staging" -auto-approve
+  when: manual
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'

@@ -1,0 +1,7 @@
+{
+  "name": "pfe-devsecops-app",
+  "version": "1.0.0",
+  "dependencies": {
+    "juice-shop": "17.1.1"
+  }
+}

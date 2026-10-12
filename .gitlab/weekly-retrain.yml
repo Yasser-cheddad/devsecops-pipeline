@@ -1,0 +1,122 @@
+# ============================================================
+#  GitLab CI – Weekly AI Model Retraining Pipeline
+#  PFE DevSecOps – EST Cybersécurité
+#
+#  Fichier : .gitlab/weekly-retrain.yml
+#  Inclure dans .gitlab-ci.yml avec:
+#    include:
+#      - local: .gitlab/weekly-retrain.yml
+#
+#  OU configurer dans GitLab:
+#  CI/CD → Schedules → New schedule
+#    Description : Weekly AI Retrain
+#    Interval    : 0 2 * * 1   (every Monday at 2am)
+#    Branch      : main
+#    Variables   : PIPELINE_TYPE = retrain
+# ============================================================
+
+stages:
+  - retrain
+  - validate
+  - deploy-model
+
+# ── Weekly Retrain (triggered by schedule) ────────────────────
+ai-weekly-retrain:
+  stage: retrain
+  image: python:3.11-slim
+  before_script:
+    - pip install scikit-learn xgboost shap joblib requests pandas numpy --quiet
+    - mkdir -p ai-service/model ai-training/data
+  script:
+    - echo "🤖 Weekly AI model retraining..."
+    - echo "Fetching fresh vulnerability data from NVD..."
+    - FORCE_RETRAIN=true python3 ai-training/train.py
+    - echo "✅ Retraining complete"
+    - |
+      python3 -c "
+      import json
+      with open('ai-service/model/metadata.json') as f:
+          meta = json.load(f)
+      fp = meta['metrics']['fp_reduction_pct']
+      roc = meta['metrics']['roc_auc']
+      print(f'FP Reduction: {fp}%')
+      print(f'ROC-AUC    : {roc}')
+      if fp < 25:
+          print('WARNING: FP reduction below 25% threshold')
+      "
+  artifacts:
+    paths:
+      - ai-service/model/
+      - ai-training/data/
+    expire_in: 30 days
+  rules:
+    - if: '$PIPELINE_TYPE == "retrain"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+# ── Validate new model ────────────────────────────────────────
+validate-new-model:
+  stage: validate
+  image: python:3.11-slim
+  before_script:
+    - pip install scikit-learn joblib numpy pandas --quiet
+  script:
+    - echo "🔍 Validating new model..."
+    - |
+      python3 << 'PYEOF'
+      import json, sys
+      import joblib
+      import numpy as np
+
+      with open("ai-service/model/metadata.json") as f:
+          meta = json.load(f)
+
+      fp_reduction = meta["metrics"]["fp_reduction_pct"]
+      roc_auc      = meta["metrics"]["roc_auc"]
+      trained_at   = meta["trained_at"]
+
+      print(f"Model trained at : {trained_at}")
+      print(f"ROC-AUC          : {roc_auc}")
+      print(f"FP Reduction     : {fp_reduction}%")
+
+      # Quality gates for the model
+      if roc_auc < 0.75:
+          print(f"❌ ROC-AUC {roc_auc} < 0.75 threshold")
+          sys.exit(1)
+      if fp_reduction < 25:
+          print(f"❌ FP reduction {fp_reduction}% < 25% threshold")
+          sys.exit(1)
+
+      print("✅ Model validation PASSED")
+      print(f"   Target: 30% FP reduction → {'✅ ACHIEVED' if fp_reduction >= 30 else '⚠️ CLOSE'}")
+      PYEOF
+  rules:
+    - if: '$PIPELINE_TYPE == "retrain"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+
+# ── Deploy new model to AI service ───────────────────────────
+deploy-new-model:
+  stage: deploy-model
+  image: docker:24
+  services:
+    - docker:24-dind
+  before_script:
+    - apk add --no-cache aws-cli
+    - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+    - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+    - aws configure set default.region $AWS_REGION
+  script:
+    - echo "🚀 Deploying updated AI model..."
+    - docker build -t $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/pfe-ai-service:latest ai-service/
+    - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
+    - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/pfe-ai-service:latest
+    - echo "✅ AI model deployed"
+    # Update ECS service to pull new image
+    - |
+      aws ecs update-service \
+        --cluster pfe-devsecops-cluster \
+        --service pfe-ai-service \
+        --force-new-deployment \
+        --region $AWS_REGION
+  rules:
+    - if: '$PIPELINE_TYPE == "retrain"'
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'

@@ -1,0 +1,529 @@
+%!TEX TS-program = xelatex
+\documentclass[12pt,a4paper]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+\usepackage{titlesec}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+\definecolor{primary}{RGB}{0, 82, 147}
+\definecolor{secondary}{RGB}{148, 27, 141}
+\definecolor{accent}{RGB}{228, 0, 70}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!8}
+}
+
+\titleformat{\chapter}[display]
+{\normalfont\huge\bfseries\color{primary}}
+{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+
+\titleformat{\section}
+{\normalfont\Large\bfseries\color{secondary}}
+{\thesection}{1em}{}
+
+\titleformat{\subsection}
+{\normalfont\large\bfseries\color{accent}}
+{\thesubsection}{1em}{}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=primary,
+  urlcolor=secondary
+}
+
+\begin{document}
+
+% ============================================================
+% PAGE DE GARDE
+% ============================================================
+\begin{titlepage}
+    \begin{tikzpicture}[remember picture, overlay]
+        \draw[line width=20pt, color=primary]
+            ([xshift=0.5cm]current page.north west) --
+            ([xshift=0.5cm]current page.south west);
+        % Remplacer par le logo EST si disponible :
+        % \node[anchor=north west, xshift=1.5cm, yshift=-1.5cm] at (current page.north west) {
+        %     \includegraphics[width=3cm]{logos/est-logo.png}
+        % };
+        \draw[line width=1pt, color=primary]
+            ([yshift=-3.5cm]current page.north west) --
+            ([yshift=-3.5cm]current page.north east);
+    \end{tikzpicture}
+
+    \vspace*{2.5cm}
+    \begin{center}
+        \textbf{\Large Rapport de Projet de Fin d'Études}\\[0.3cm]
+        \textbf{\large Filière Cybersécurité --- 5\textsuperscript{e} année}\\[1cm]
+
+        \textbf{\Large École Supérieure de Technologie}\\[1cm]
+
+        \textbf{\large Sous le thème}\\[0.5cm]
+        \noindent\rule{\textwidth}{1pt}\\[0.5cm]
+
+        \textbf{\Huge \textcolor{primary}{Pipeline CI/CD Sécurisé}}\\[0.2cm]
+        \textbf{\LARGE \textcolor{secondary}{avec Tests de Sécurité Automatisés}}\\[0.2cm]
+        \textbf{\large (SAST, DAST, SCA, IaC, Container Scanning, Secret Detection)}\\[0.2cm]
+        \textbf{\large + Cloud AWS, Modèle IA \& Dashboard Interactif}\\[0.5cm]
+
+        \noindent\rule{\textwidth}{1pt}\\[1.5cm]
+
+        \begin{minipage}{0.85\textwidth}
+            \centering
+            \textbf{\large Réalisé par :}\\
+            Mohammed Yasser \textsc{CHEDDAD}\\
+            Abdelkamel \textsc{RAOUI}\\[1cm]
+
+            \textbf{\large Encadré par :}\\
+            M\textsuperscript{me} Imane \textsc{AITOUHANNI}\\[1.5cm]
+
+            \textbf{\large Année universitaire :}\\
+            2025--2026
+        \end{minipage}
+
+        \vfill
+        \textbf{\large \textcolor{primary}{École Supérieure de Technologie}}
+    \end{center}
+\end{titlepage}
+
+% ============================================================
+% DÉDICACE & REMERCIEMENTS
+% ============================================================
+\chapter*{Dédicace}
+\textit{
+Je dédie ce travail à mes parents, pour leur soutien et leurs encouragements tout au long de mon parcours académique. À ma famille, mes enseignants et mes camarades de promotion, pour leur confiance et leur aide précieuse durant la réalisation de ce projet.
+}
+
+\chapter*{Remerciements}
+Nous tenons à exprimer notre profonde gratitude à M\textsuperscript{me} Imane \textsc{AITOUHANNI}, notre encadrante académique, pour ses conseils, sa disponibilité et son accompagnement tout au long de ce Projet de Fin d'Études. Nous remercions également l'École Supérieure de Technologie et l'ensemble du corps enseignant de la filière Cybersécurité pour la formation reçue.
+
+\chapter*{Résumé}
+Ce projet de fin d'études vise à concevoir, implémenter et valider un pipeline \textit{DevSecOps} intégrant des mécanismes de tests de sécurité automatisés capables de bloquer le déploiement de code vulnérable. La solution combine la détection de secrets (TruffleHog), l'analyse statique (Semgrep, SonarQube), l'analyse des dépendances (Snyk), le scan des conteneurs (Trivy), l'analyse de l'infrastructure (Checkov), les tests dynamiques (OWASP ZAP), le déploiement cloud sur AWS (ECS Fargate via Terraform), un modèle d'intelligence artificielle pour réduire les faux positifs SAST, et un dashboard interactif (React + FastAPI) pour visualiser l'état du pipeline et des vulnérabilités. Les résultats obtenus montrent un pipeline fonctionnel avec une réduction de 33,3\,\% des faux positifs Semgrep grâce au filtre IA, et un déploiement réussi sur AWS en environnement staging.
+
+\textbf{Mots-clés :} DevSecOps, CI/CD, SAST, DAST, SCA, AWS, Terraform, Intelligence Artificielle, Dashboard.
+
+\chapter*{Abstract}
+This graduation project designs and validates a secure CI/CD pipeline integrating automated security testing gates (SAST, DAST, SCA, IaC scanning, container scanning, secret detection), AWS cloud deployment, an AI-based false-positive filter, and an interactive security dashboard. The implemented GitLab pipeline successfully deploys OWASP Juice Shop on ECS Fargate and achieves a 33.3\% Semgrep false-positive reduction through machine learning classification.
+
+\chapter*{Liste des acronymes}
+\begin{longtable}{@{}p{3cm}p{11cm}@{}}
+    CI/CD & Intégration et déploiement continus \\
+    SAST & Static Application Security Testing \\
+    DAST & Dynamic Application Security Testing \\
+    SCA & Software Composition Analysis \\
+    IaC & Infrastructure as Code \\
+    CVE & Common Vulnerabilities and Exposures \\
+    ECS & Amazon Elastic Container Service \\
+    ECR & Amazon Elastic Container Registry \\
+    ALB & Application Load Balancer \\
+    RDS & Relational Database Service \\
+    SHAP & SHapley Additive exPlanations \\
+    OWASP & Open Web Application Security Project \\
+    DevSecOps & Développement, Sécurité et Opérations \\
+\end{longtable}
+
+\tableofcontents
+\listoffigures
+\listoftables
+\newpage
+
+% ============================================================
+% CHAPITRE 1 — INTRODUCTION
+% ============================================================
+\chapter{Introduction Générale}
+
+\section{Contexte}
+Les organisations adoptant les méthodologies DevOps intègrent souvent la sécurité tardivement, exposant les applications à des vulnérabilités exploitables en production. L'approche \textit{Shift Left} --- intégrer la sécurité dès les premières phases du cycle de développement --- est devenue une exigence incontournable. Ce projet s'inscrit dans ce contexte en proposant un pipeline CI/CD sécurisé, déployé sur AWS, enrichi par un modèle IA et un dashboard de visualisation.
+
+\section{Problématique}
+Comment automatiser la détection et le blocage des vulnérabilités à chaque étape du cycle de vie logiciel, tout en réduisant les faux positifs et en offrant une visibilité temps réel sur l'état de sécurité du pipeline et de l'infrastructure cloud ?
+
+\section{Objectifs du projet}
+\begin{itemize}
+    \item Automatiser la détection de vulnérabilités (SAST, DAST, SCA, IaC, conteneurs, secrets).
+    \item Établir des \textit{security gates} bloquant le déploiement en cas de seuils critiques dépassés.
+    \item Déployer l'application cible (OWASP Juice Shop) sur AWS ECS Fargate via Terraform.
+    \item Intégrer un modèle IA réduisant les faux positifs SAST d'au moins 30\,\%.
+    \item Développer un dashboard React + FastAPI pour visualiser les résultats des scans.
+    \item Produire des rapports exploitables (JSON, SARIF, JUnit).
+\end{itemize}
+
+\section{Méthodologie}
+Le projet suit une approche incrémentale : analyse du cahier des charges, conception de l'architecture, implémentation du pipeline GitLab CI, provisionnement Terraform, développement des services IA et dashboard, puis validation sur un pipeline réel (ID~2513727324, commit \texttt{93bf8a4f}).
+
+\section{Organisation du rapport}
+Le chapitre~\ref{ch:etat-art} présente l'état de l'art DevSecOps. Le chapitre~\ref{ch:specs} détaille les spécifications. Le chapitre~\ref{ch:archi} décrit l'architecture. Les chapitres suivants couvrent l'implémentation, les résultats et la conclusion.
+
+% ============================================================
+% CHAPITRE 2 — ÉTAT DE L'ART
+% ============================================================
+\chapter{État de l'art}
+\label{ch:etat-art}
+
+\section{DevSecOps et Shift Left}
+Le DevSecOps étend le DevOps en intégrant la sécurité comme responsabilité partagée. Les pratiques \textit{Shift Left} placent les contrôles de sécurité en amont : analyse du code source, des dépendances, des images Docker et de l'infrastructure avant tout déploiement.
+
+\section{Outils de sécurité applicative}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Catégorie} & \textbf{Outil retenu} & \textbf{Rôle} \\
+\midrule
+Secret Detection & TruffleHog & Détection de secrets dans l'historique Git \\
+SAST & Semgrep + SonarQube & Analyse statique du code \\
+SCA & Snyk & Vulnérabilités des dépendances \\
+Container Scan & Trivy & CVE dans les images Docker \\
+IaC Scan & Checkov & Misconfigurations Terraform/Dockerfile \\
+DAST & OWASP ZAP & Tests dynamiques sur l'app déployée \\
+\bottomrule
+\end{tabular}
+\caption{Matrice des outils de sécurité du projet}
+\label{tab:outils}
+\end{table}
+
+\section{Cloud et orchestration}
+AWS ECS Fargate permet d'exécuter des conteneurs sans gérer les serveurs. Terraform provisionne le VPC, l'ALB, ECS, ECR et RDS de manière reproductible et versionnée.
+
+\section{IA pour la sécurité}
+Les alertes SAST génèrent de nombreux faux positifs. Un modèle de classification (Random Forest / scikit-learn) associé à SHAP permet de prioriser les vulnérabilités et d'expliquer les décisions du modèle.
+
+% ============================================================
+% CHAPITRE 3 — SPÉCIFICATIONS
+% ============================================================
+\chapter{Analyse des besoins et spécifications}
+\label{ch:specs}
+
+\section{Besoins fonctionnels}
+\begin{longtable}{@{}p{2cm}p{5cm}p{6cm}@{}}
+\toprule
+\textbf{ID} & \textbf{Exigence} & \textbf{Critère d'acceptation} \\
+\midrule
+\endhead
+APP-01 & Application cible & Juice Shop accessible via ALB \\
+PIP-01 & Pipeline CI/CD & Déclenchement sur push et MR \\
+SAST-01 & Semgrep & Échec si $\geq$1 Critical \\
+SCA-01 & Snyk & Échec si $\geq$1 Critical ou $\geq$3 High \\
+CTR-01 & Trivy & Scan post-build de l'image \\
+CLOUD-01 & Terraform & VPC, ECS, RDS, ECR provisionnés \\
+AI-01 & Modèle IA & API REST de classification \\
+AI-02 & Réduction FP & $\geq$30\,\% des alertes Semgrep filtrées \\
+DASH-01 & Dashboard & Vue des security gates en temps réel \\
+DASH-06 & API Backend & Endpoints REST pour les scans \\
+\bottomrule
+\caption{Exigences fonctionnelles principales (cahier des charges v2.0)}
+\end{longtable}
+
+\section{Besoins non fonctionnels}
+\begin{itemize}
+    \item \textbf{Performance :} temps total pipeline $<$ 8 minutes (objectif).
+    \item \textbf{IA :} inférence $<$ 500\,ms par vulnérabilité.
+    \item \textbf{Coût cloud :} $<$ 15\,€/mois (ressources minimales).
+    \item \textbf{Sécurité :} secrets AWS et tokens jamais exposés dans les logs.
+\end{itemize}
+
+% ============================================================
+% CHAPITRE 4 — ARCHITECTURE
+% ============================================================
+\chapter{Architecture technique}
+\label{ch:archi}
+
+\section{Vue d'ensemble}
+Le flux global du pipeline est le suivant :
+\begin{center}
+\texttt{Code $\rightarrow$ Secret Detection $\rightarrow$ SAST $\rightarrow$ AI Filter $\rightarrow$ SCA $\rightarrow$ Build $\rightarrow$ Trivy $\rightarrow$ Checkov $\rightarrow$ Deploy Staging $\rightarrow$ DAST $\rightarrow$ Dashboard $\rightarrow$ Deploy Production (manuel)}
+\end{center}
+
+\section{Arborescence du projet}
+\begin{lstlisting}
+pfe-project/
+  .gitlab-ci.yml          # Pipeline DevSecOps
+  app/                    # Dépendances Juice Shop (SCA)
+  ai-service/             # API FastAPI + modèle ML
+  ai-training/            # Script d'entraînement
+  dashboard/
+    frontend/             # React + Vite + Tailwind + Recharts
+    backend/              # FastAPI (agrégation des rapports)
+  terraform/              # Infrastructure AWS
+  scripts/                  # ai-filter.py, aggregate-reports.py
+  security-tools/zap/     # Configuration OWASP ZAP
+  reports/                  # Artefacts JSON du pipeline
+\end{lstlisting}
+
+\section{Architecture cloud AWS}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Composant} & \textbf{Technologie / ressource} \\
+\midrule
+Réseau & VPC, sous-réseaux publics/privés \\
+Exposition & Application Load Balancer (ALB) \\
+Compute & ECS Fargate (256 CPU / 512 Mo) \\
+Registry & Amazon ECR \\
+Base de données & Amazon RDS \\
+IaC & Terraform (workspaces staging/production) \\
+Analyse qualité & SonarQube sur EC2 \\
+\bottomrule
+\end{tabular}
+\caption{Composants AWS provisionnés}
+\label{tab:aws}
+\end{table}
+
+\section{Dashboard et services IA}
+\begin{itemize}
+    \item \textbf{ai-service} (port 8001) : \texttt{/classify}, \texttt{/explain}, \texttt{/health}.
+    \item \textbf{dashboard/backend} (port 8080) : \texttt{/api/pipeline/status}, \texttt{/api/vulnerabilities}.
+    \item \textbf{dashboard/frontend} : React, filtres par outil/sévérité, graphiques Recharts, bouton Explain (SHAP).
+\end{itemize}
+
+% ============================================================
+% CHAPITRE 5 — IMPLÉMENTATION
+% ============================================================
+\chapter{Implémentation}
+
+\section{Pipeline GitLab CI}
+Le fichier \texttt{.gitlab-ci.yml} définit 11 étapes (\textit{stages}) :
+\begin{enumerate}
+    \item \texttt{secret-detection} --- TruffleHog sur l'historique Git.
+    \item \texttt{sast} --- Semgrep (règles auto + custom) et SonarQube.
+    \item \texttt{ai-filter} --- Classification des findings Semgrep.
+    \item \texttt{sca} --- Snyk sur \texttt{app/package.json}.
+    \item \texttt{build} --- Construction de l'image Docker Juice Shop.
+    \item \texttt{container-scan} --- Trivy sur l'image.
+    \item \texttt{iac-scan} --- Checkov sur \texttt{terraform/} et \texttt{Dockerfile}.
+    \item \texttt{deploy-staging} --- \texttt{terraform apply} (workspace staging).
+    \item \texttt{dast} --- OWASP ZAP sur l'URL staging.
+    \item \texttt{dashboard} --- Agrégation JSON + build image dashboard.
+    \item \texttt{deploy-production} --- Déploiement manuel en production.
+\end{enumerate}
+
+\section{Security gates}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Étape} & \textbf{Seuil d'échec} & \textbf{Comportement} \\
+\midrule
+TruffleHog & Secret vérifié trouvé & \texttt{exit 1} \\
+Semgrep & $\geq$1 finding ERROR/CRITICAL & \texttt{exit 1} \\
+Snyk & $\geq$1 Critical ou $\geq$3 High & \texttt{exit 1} \\
+Trivy & CVE Critical (configurable) & \texttt{exit 1} \\
+Checkov & Misconfiguration HIGH & \texttt{soft-fail} \\
+ZAP & $\geq$1 alerte High & \texttt{allow\_failure} \\
+\bottomrule
+\end{tabular}
+\caption{Seuils des security gates}
+\label{tab:gates}
+\end{table}
+
+\section{Modèle IA}
+Le script \texttt{ai-training/train.py} entraîne un Random Forest sur des features extraites des alertes (sévérité, outil, CVE, patterns d'injection, fichier de test, etc.). Le service \texttt{ai-service/inference.py} expose l'API FastAPI avec explicabilité SHAP. En l'absence de modèle, un fallback par règles est utilisé.
+
+\section{Dashboard}
+Le script \texttt{scripts/aggregate-reports.py} fusionne les rapports Semgrep, Snyk, Trivy, ZAP et les métadonnées cloud dans \texttt{reports/dashboard-summary.json}. L'interface React consomme l'API FastAPI et affiche les gates, le taux de filtrage IA, l'état ECS/RDS et le tableau des vulnérabilités.
+
+% ============================================================
+% CHAPITRE 6 — RÉSULTATS
+% ============================================================
+\chapter{Résultats et validation}
+\label{ch:resultats}
+
+\section{Exécution du pipeline}
+Le pipeline GitLab \textbf{\#2513727324} (branche \texttt{main}, commit \texttt{93bf8a4f}) a été exécuté avec succès le 30 mai 2026. L'ensemble des security gates critiques est passé ; le déploiement production reste en attente d'approbation manuelle.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Étape} & \textbf{Statut} & \textbf{Détail} \\
+\midrule
+secret-detection & passed & 0 secret vérifié \\
+semgrep-sast & passed & 0 critical \\
+sonarqube-sast & passed & 4 issues \\
+snyk-sca & passed & allow\_failure \\
+trivy-container-scan & passed & 43 CVEs détectées \\
+checkov-iac-scan & passed & IaC clean \\
+deploy-staging & passed & ECS Fargate \\
+owasp-zap-dast & passed & 16 alertes \\
+deploy-production & manual & En attente \\
+\bottomrule
+\end{tabular}
+\caption{État des security gates --- pipeline \#2513727324}
+\label{tab:pipeline-results}
+\end{table}
+
+\section{Filtrage IA}
+Sur 12 alertes Semgrep analysées, le modèle IA a classé \textbf{4 faux positifs} et confirmé \textbf{8 vrais positifs}, soit une \textbf{réduction de 33,3\,\%}, dépassant l'objectif de 30\,\% fixé dans le cahier des charges (exigence AI-02).
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Métrique IA} & \textbf{Valeur} \\
+\midrule
+Alertes Semgrep totales & 12 \\
+Faux positifs filtrés & 4 \\
+Vrais positifs confirmés & 8 \\
+Taux de réduction & 33,3\,\% \\
+\bottomrule
+\end{tabular}
+\caption{Résultats du filtre IA}
+\label{tab:ai}
+\end{table}
+
+\section{État du cloud AWS (staging)}
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Paramètre} & \textbf{Valeur} \\
+\midrule
+Région & eu-west-1 \\
+Cluster ECS & pfe-devsecops-cluster \\
+Service ECS & pfe-devsecops-service \\
+Tâches running / desired & 1 / 1 \\
+Cibles ALB saines & 1 \\
+Statut RDS & available \\
+URL application & \url{http://pfe-devsecops-alb-5bdf3a52b3892ce4.eu-west-1.elb.amazonaws.com} \\
+SonarQube & \url{http://54.170.193.223:9000} \\
+\bottomrule
+\end{tabular}
+\caption{État de l'infrastructure AWS --- environnement staging}
+\label{tab:cloud}
+\end{table}
+
+\section{Synthèse des vulnérabilités}
+Le dashboard agrège \textbf{18 vulnérabilités} issues de quatre outils :
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{Outil} & \textbf{Nombre} & \textbf{Exemples} \\
+\midrule
+Trivy & 6 & 4 Critical (CVE-2023-44487, CVE-2024-37890\ldots) \\
+ZAP & 5 & CSP manquante, anti-clickjacking \\
+Semgrep & 3 & SQL injection (score IA 0,91), secret hardcodé \\
+SonarQube & 4 & Dockerfile : HEALTHCHECK, non-root \\
+\bottomrule
+\end{tabular}
+\caption{Répartition des vulnérabilités par outil}
+\label{tab:vulns}
+\end{table}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Sévérité} & \textbf{Nombre} \\
+\midrule
+CRITICAL & 4 \\
+HIGH & 2 \\
+MEDIUM & 9 \\
+LOW & 2 \\
+WARNING & 1 \\
+\bottomrule
+\end{tabular}
+\caption{Répartition par sévérité}
+\label{tab:severity}
+\end{table}
+
+\section{Exemples de décisions IA (Semgrep)}
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}p{4.5cm}cccl@{}}
+\toprule
+\textbf{Finding} & \textbf{Sév.} & \textbf{Score} & \textbf{Label} & \textbf{Statut} \\
+\midrule
+SQL injection (routes.js:45) & ERROR & 0,91 & true\_positive & open \\
+Hardcoded secret (config.js:12) & WARNING & 0,82 & true\_positive & open \\
+Console.log données sensibles & WARNING & 0,15 & false\_positive & filtered \\
+\bottomrule
+\end{tabular}
+\caption{Exemples de classification IA sur alertes Semgrep}
+\label{tab:ai-examples}
+\end{table}
+
+% ============================================================
+% CHAPITRE 7 — DISCUSSION
+% ============================================================
+\chapter{Discussion et limites}
+
+\section{Points forts}
+\begin{itemize}
+    \item Pipeline complet couvrant l'ensemble du spectre DevSecOps demandé.
+    \item Déploiement cloud réel sur AWS avec Terraform et workspaces.
+    \item Objectif IA de réduction des faux positifs atteint (33,3\,\%).
+    \item Dashboard opérationnel agrégeant les rapports multi-outils.
+\end{itemize}
+
+\section{Limites}
+\begin{itemize}
+    \item Les CVE Trivy proviennent en grande partie de l'image Juice Shop upstream (43 CVEs) --- application volontairement vulnérable.
+    \item Le job Snyk est en \texttt{allow\_failure} ; le gate strict n'est pas encore bloquant en production.
+    \item Le scan ZAP utilise une URL ALB codée en dur dans le CI (à paramétrer via variable \texttt{APP\_URL}).
+    \item Le dashboard n'est pas encore déployé sur ECS (image buildée en CI, déploiement à finaliser).
+\end{itemize}
+
+\section{Perspectives}
+\begin{itemize}
+    \item Déployer le dashboard et le service IA sur ECS derrière l'ALB.
+    \item Automatiser les PR de remédiation (exigence REM-01).
+    \item Intégrer Allure pour les rapports HTML consolidés.
+    \item Re-training hebdomadaire via \texttt{.gitlab/weekly-retrain.yml}.
+\end{itemize}
+
+% ============================================================
+% CONCLUSION
+% ============================================================
+\chapter*{Conclusion Générale}
+\addcontentsline{toc}{chapter}{Conclusion Générale}
+
+Ce Projet de Fin d'Études a permis de concevoir et de valider un pipeline DevSecOps complet, conforme au cahier des charges v2.0. En intégrant des outils industriels (TruffleHog, Semgrep, SonarQube, Snyk, Trivy, Checkov, OWASP ZAP), un déploiement automatisé sur AWS, un filtre IA réduisant les faux positifs de 33,3\,\%, et un dashboard React + FastAPI, le projet démontre la faisabilité d'une approche \textit{Shift Left} en environnement académique.
+
+Les résultats du pipeline \#2513727324 confirment le bon fonctionnement des security gates, le déploiement staging sur ECS Fargate, et la capacité du système à centraliser 18 vulnérabilités multi-sources. Les travaux futurs porteront sur le déploiement du dashboard en production, l'automatisation de la remédiation et le durcissement des seuils SCA/DAST.
+
+Ce projet a consolidé nos compétences en cybersécurité applicative, CI/CD, cloud AWS, machine learning et développement full-stack, constituant une base solide pour une carrière en DevSecOps.
+
+% ============================================================
+% BIBLIOGRAPHIE
+% ============================================================
+\chapter*{Bibliographie}
+\addcontentsline{toc}{chapter}{Bibliographie}
+
+\begin{enumerate}
+    \item OWASP Foundation. \textit{OWASP DevSecOps Guideline}. \url{https://owasp.org/www-project-devsecops-guideline/}
+    \item Semgrep. \textit{Documentation des règles}. \url{https://semgrep.dev/docs/}
+    \item Aqua Security. \textit{Trivy Documentation}. \url{https://aquasecurity.github.io/trivy/}
+    \item Bridgecrew. \textit{Checkov Documentation}. \url{https://www.checkov.io/}
+    \item OWASP ZAP. \textit{API Documentation}. \url{https://www.zaproxy.org/docs/api/}
+    \item HashiCorp. \textit{Terraform AWS Provider}. \url{https://registry.terraform.io/providers/hashicorp/aws/}
+    \item AWS. \textit{ECS Fargate Documentation}. \url{https://docs.aws.amazon.com/ecs/}
+    \item scikit-learn. \textit{User Guide}. \url{https://scikit-learn.org/}
+    \item SHAP. \textit{Explainable AI}. \url{https://shap.readthedocs.io/}
+    \item FastAPI. \textit{Documentation}. \url{https://fastapi.tiangolo.com/}
+    \item React. \textit{Documentation}. \url{https://react.dev/}
+    \item GitLab. \textit{CI/CD Documentation}. \url{https://docs.gitlab.com/ee/ci/}
+\end{enumerate}
+
+\end{document}

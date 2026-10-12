@@ -1,0 +1,26 @@
+# Local stack: AI service + dashboard API + dev frontend
+# Usage: docker compose -f docker-compose.dashboard.yml up --build
+
+services:
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./ai-service/model:/app/model:ro
+
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: dashboard/backend/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      REPORTS_DIR: /app/reports
+      AI_SERVICE_URL: http://ai-service:8001
+    volumes:
+      - ./reports:/app/reports:ro
+    depends_on:
+      - ai-service

@@ -1,0 +1,6 @@
+soft-fail-on:
+  - CKV_DOCKER_2
+  - CKV_DOCKER_7
+hard-fail-on:
+  - HIGH
+  - CRITICAL
